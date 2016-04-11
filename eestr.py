@@ -2,6 +2,8 @@
 import boto3
 from datetime import datetime
 
+ec2 = boto3.client('ec2')
+
 def is_my_instance(instance):
 	'''Function to filter instances'''
 	
@@ -14,32 +16,39 @@ def is_my_instance(instance):
 
 def check_volume_tags(instance, volume):
 	'''Check if instance tags are present in volume tags'''
-	
+
 	if not instance.tags:
 		return True
 	if instance.tags and not volume.tags:
 		return False
 
-	vol_tags = volume.tags
-
 	for tag in instance.tags:
-		if tag not in vol_tags:
-			#print "Tag " + str(tag) + " NOT in " + str(vol_tags)
+		if tag not in volume.tags:
+			#print "Tag " + str(tag) + " NOT in " + str(volume.tags)
 			return False
 
 def check_snap_tags(volume, snapshot):
 	'''Check if the given snapshot has the proper tags'''
+	try:
 
-	if not volume.tags:
-		return True
-	if volume.tags and not snapshot.tags:
-		return False
+		print ">>> Checkeo vol tags y snap tags"
+		print volume.tags
+		print snapshot.tags
 
-	snap_tags = snapshot.tags
-
-	for tag in volume.tags:
-		if tag not in snap_tags:
+		if not volume.tags:
+			#print ">>> check_snap_tags: volumen sin tags"
+			return True
+		if volume.tags and not snapshot.tags:
+			#print ">>> check_snap_tags: snap sin tags"
 			return False
+
+		for tag in snapshot.tags:
+			if tag not in snapshot.tags:
+				#print ">>> check_snap_tags: tag not in volume"
+				return False
+
+	except Exception as e:
+		print e
 
 def apply_tags(instance, volume):
 	'''If instance and volume tags dont match, propagate them'''
@@ -54,18 +63,18 @@ def apply_tags(instance, volume):
 		# Si el tag no esta en la lista de tags...
 		if tag not in vol_tags and not tag['Key'].startswith("aws:"):
 			
-			print "Aplico el tag " + str(tag) + " al volumen " + volume.id 
+			print "Applying tag " + str(tag) + " to volume " + volume.id 
 
 			vol_tags.append(tag)
 			volume.create_tags(DryRun=False, Tags=vol_tags)
 
 
-def get_proper_instances(ec2):
+def get_proper_instances(ec2_session):
 	'''Get instances in our project'''
 	
 	inst = []
 
-	for instance in ec2.instances.all():
+	for instance in ec2_session.instances.all():
 		if is_my_instance(instance):
 			inst.append(instance)
 
@@ -87,39 +96,50 @@ def apply_tags_to_volumes(instances):
 				apply_tags(instance, volume)
 	return vols
 
-def apply_tags_to_snaps(volumes, ec2):
+def apply_tags_to_snaps(volumes):
 	'''Apply tags to snaps which corresponds to a given list of volumes'''
 
-	print "snaps"
+	print "> Snaps"
+
+	ec2_resource = boto3.resource('ec2')
 
 	for volume in volumes:
 		if volume.snapshot_id:
-			if check_snap_tags(volume, ec2.Snapshot(volume.snapshot_id)):
-				print "snapshot " + snapshot_id + " bien tagged"
-			else:
-				print "snapshot " + snapshot_id + " mal tagged"
+			
+			try:
 
 
-def eestr(ec2):
+				snap = ec2_resource.Snapshot(volume.snapshot_id)
+				
+				#print ">> Snap {}".format(volume.snapshot_id)
+				#print ">> {}".format(volume.tags)
+
+				check_snap_tags(volume, snap):
+
+			except Exception as e:
+				
+				print ">>> Snap {} doesnt exist".format(volume.snapshot_id)
+
+def eestr(ec2_session):
 	'''Get instances on my own. Get Volumes and apply tags. Get Snaps and apply tags'''
 
-	instances = get_proper_instances(ec2)
+	instances = get_proper_instances(ec2_session)
 
 	volumes = apply_tags_to_volumes(instances)
 
-	apply_tags_to_snaps(volumes, ec2)
+	#apply_tags_to_snaps(volumes)
 
 
 def lambda_handler(event, context):
 
 	print('Starting function at {}'.format(str(datetime.now())))
-	
+
 	# start connectivity
 	s = boto3.Session()
-	ec2 = s.resource('ec2')
+	ec2_session = s.resource('ec2')
 
 	try:
-		if eestr(ec2):
+		if eestr(ec2_session):
 			print "Success!"
 
 	except Exception as e:
@@ -129,3 +149,6 @@ def lambda_handler(event, context):
 	finally:
 		print('Check complete at {}'.format(str(datetime.now())))
 		return "OK"
+
+if __name__ == "__main__":
+	lambda_handler(None, None)
